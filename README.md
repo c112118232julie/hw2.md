@@ -1,4 +1,4 @@
-# 安裝必要套件 (Colab 用)
+# 安裝需要套件
 !pip install graphviz matplotlib pandas
 
 from collections import defaultdict, deque
@@ -6,126 +6,107 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from graphviz import Digraph
 
-# -----------------------------
+# ------------------------------------------------------------
 # 1. 定義任務 (ID, 名稱, 工期, 前置任務)
-# ⚠️ 這裡只是範例，請改成你圖3-27 的真實 11 項任務
-# -----------------------------
+# ------------------------------------------------------------
 tasks = [
-    ("A", "Project Approval", 5, []),
-    ("B", "Hire Analyst", 10, ["A"]),
-    ("C", "Requirements Gathering", 8, ["A"]),
-    ("D", "System Design", 12, ["B","C"]),
-    ("E", "Procure Equipment", 14, ["A"]),
-    ("F", "Setup Environment", 6, ["E"]),
-    ("G", "Training Plan", 5, ["D"]),
-    ("H", "Logistics Arrangement", 10, ["E"]),
-    ("I", "Conduct Training", 15, ["G","H","F"]),
-    ("J", "Pilot Test", 7, ["F","D"]),
-    ("K", "Final Deployment", 4, ["I","J"]),
+    ("1", "研擬計畫", 1, []),            
+    ("2", "任務分配", 4, ["1"]),
+    ("3", "取得硬體", 17, ["1"]),
+    ("4", "程式開發", 70, ["2"]),
+    ("5", "安裝硬體", 10, ["3"]),
+    ("6", "程式測試", 30, ["4"]),
+    ("7", "撰寫使用手冊", 25, ["5"]),
+    ("8", "轉換檔案", 20, ["5"]),
+    ("9", "系統測試", 25, ["6"]),
+    ("10", "使用者訓練", 20, ["7","8"]),
+    ("11", "使用者測試", 25, ["9","10"]),
 ]
 
-# -----------------------------
-# 2. 建立關聯 (前置 & 後繼)
-# -----------------------------
-duration = {t[0]: t[2] for t in tasks}
-name = {t[0]: t[1] for t in tasks}
-pred = {t[0]: list(t[3]) for t in tasks}
-succ = defaultdict(list)
-for t in tasks:
-    for p in t[3]:
-        succ[p].append(t[0])
+# ------------------------------------------------------------
+# 2. 建立圖結構
+# ------------------------------------------------------------
+graph = defaultdict(list)
+durations = {}
+predecessors = defaultdict(list)
+for tid, name, duration, preds in tasks:
+    durations[tid] = duration
+    for p in preds:
+        graph[p].append(tid)
+    predecessors[tid] = preds
 
-# -----------------------------
-# 3. 拓樸排序 (找任務順序)
-# -----------------------------
-in_deg = {t[0]: 0 for t in tasks}
-for t in tasks:
-    for p in pred[t[0]]:
-        in_deg[t[0]] += 1
+# ------------------------------------------------------------
+# 3. 拓樸排序 + 最早開始/完成時間
+# ------------------------------------------------------------
+indegree = {tid: 0 for tid, _, _, _ in tasks}
+for tid in graph:
+    for nxt in graph[tid]:
+        indegree[nxt] += 1
 
-q = deque([n for n,d in in_deg.items() if d==0])
-topo = []
-while q:
-    n = q.popleft()
-    topo.append(n)
-    for s in succ[n]:
-        in_deg[s] -= 1
-        if in_deg[s]==0:
-            q.append(s)
-
-# -----------------------------
-# 4. Forward pass (最早開始/完成)
-# -----------------------------
+queue = deque([tid for tid in indegree if indegree[tid] == 0])
 ES, EF = {}, {}
-for n in topo:
-    ES[n] = max([EF[p] for p in pred[n]] or [0])
-    EF[n] = ES[n] + duration[n]
+while queue:
+    cur = queue.popleft()
+    ES[cur] = max([EF[p] for p in predecessors[cur]] or [0])
+    EF[cur] = ES[cur] + durations[cur]
+    for nxt in graph[cur]:
+        indegree[nxt] -= 1
+        if indegree[nxt] == 0:
+            queue.append(nxt)
 
 project_duration = max(EF.values())
 
-# -----------------------------
-# 5. Backward pass (最晚開始/完成)
-# -----------------------------
-LF, LS = {}, {}
-for n in reversed(topo):
-    LF[n] = min([LS[s] for s in succ[n]] or [project_duration])
-    LS[n] = LF[n] - duration[n]
-
-# -----------------------------
-# 6. Slack 與關鍵路徑
-# -----------------------------
-slack = {n: LS[n] - ES[n] for n in topo}
-critical = [n for n in topo if slack[n]==0]
-
-# -----------------------------
-# 7. 輸出 DataFrame (排程表)
-# -----------------------------
-df = pd.DataFrame([{
-    "ID": n,
-    "Task": name[n],
-    "Duration": duration[n],
-    "Predecessors": ",".join(pred[n]) if pred[n] else "-",
-    "ES": ES[n],
-    "EF": EF[n],
-    "LS": LS[n],
-    "LF": LF[n],
-    "Slack": slack[n],
-    "Critical": ("Yes" if slack[n]==0 else "No")
-} for n in topo])
-
-print("=== 專案排程表 ===")
-print(df)
-print("\n專案總工期:", project_duration, "天")
-print("關鍵路徑:", " -> ".join(critical))
-
-# -----------------------------
-# 8. 畫 Gantt 圖
-# -----------------------------
-plt.figure(figsize=(10,6))
-y_positions = range(len(topo))
-plt.barh(y_positions, [duration[n] for n in topo], left=[ES[n] for n in topo], color="skyblue")
-plt.yticks(y_positions, [f"{n}: {name[n]}" for n in topo])
-plt.xlabel("Day")
-plt.title("Gantt Chart")
-plt.grid(axis='x', linestyle='--', linewidth=0.5)
-plt.show()
-
-# -----------------------------
-# 9. 畫 PERT/CPM 圖 (Graphviz)
-# -----------------------------
-dot = Digraph(comment="PERT/CPM")
-dot.attr(rankdir="LR", shape="record")
-
-for n in topo:
-    lbl = f"{name[n]}\\nID:{n}\\nDur:{duration[n]}d\\nES:{ES[n]} EF:{EF[n]}"
-    if n in critical:
-        dot.node(n, lbl, style="filled", fillcolor="lightcoral")  # 關鍵路徑用紅色
+# ------------------------------------------------------------
+# 4. 計算最晚開始/完成時間 (LS, LF)
+# ------------------------------------------------------------
+LS, LF = {}, {}
+for tid in reversed(list(EF.keys())):
+    if not graph[tid]:  # 沒有後繼
+        LF[tid] = project_duration
     else:
-        dot.node(n, lbl, style="filled", fillcolor="lightyellow")
+        LF[tid] = min([LS[nxt] for nxt in graph[tid]])
+    LS[tid] = LF[tid] - durations[tid]
 
-for n in topo:
-    for s in succ[n]:
-        dot.edge(n, s)
+# ------------------------------------------------------------
+# 5. 找出關鍵路徑 (slack=0)
+# ------------------------------------------------------------
+slack = {tid: LS[tid] - ES[tid] for tid in ES}
+critical_path = [tid for tid in slack if slack[tid] == 0]
 
-dot.render("PERT_CPM", format="png", cleanup=True)  # 會輸出 PERT_CPM.png
+print("專案總工期:", project_duration)
+print("關鍵路徑:", " → ".join(critical_path))
 
+# ------------------------------------------------------------
+# 6. 畫 PERT/CPM 圖
+# ------------------------------------------------------------
+dot = Digraph(format="png")
+dot.attr(rankdir="LR")
+for tid, name, duration, preds in tasks:
+    label = f"{tid}. {name}\\n工期:{duration}天\\nES:{ES[tid]}, EF:{EF[tid]}\\nLS:{LS[tid]}, LF:{LF[tid]}"
+    if tid in critical_path:
+        dot.node(tid, label, shape="box", style="filled", color="lightcoral")
+    else:
+        dot.node(tid, label, shape="box")
+    for p in preds:
+        dot.edge(p, tid)
+dot.render("pert_chart", cleanup=True)
+print("PERT/CPM 圖已輸出: pert_chart.png")
+
+# ------------------------------------------------------------
+# 7. 畫甘特圖
+# ------------------------------------------------------------
+df = pd.DataFrame([
+    {"任務": f"{tid}.{name}", "開始": ES[tid], "結束": EF[tid], "工期": durations[tid], "是否關鍵": tid in critical_path}
+    for tid, name, _, _ in tasks
+])
+
+fig, ax = plt.subplots(figsize=(10,6))
+for i, row in df.iterrows():
+    color = "red" if row["是否關鍵"] else "skyblue"
+    ax.barh(row["任務"], row["工期"], left=row["開始"], color=color, edgecolor="black")
+    ax.text(row["開始"]+row["工期"]/2, i, f"{row['工期']}天", va="center", ha="center", color="black")
+ax.set_xlabel("時間（天）")
+ax.set_ylabel("任務")
+ax.set_title("專案甘特圖")
+plt.gca().invert_yaxis()
+plt.show()
