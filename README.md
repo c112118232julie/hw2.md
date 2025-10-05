@@ -1,112 +1,86 @@
-# 安裝需要套件
-!pip install graphviz matplotlib pandas
+# 專案管理分析 - PERT/CPM與甘特圖
 
-from collections import defaultdict, deque
-import pandas as pd
-import matplotlib.pyplot as plt
-from graphviz import Digraph
+## 任務清單
 
-# ------------------------------------------------------------
-# 1. 定義任務 (ID, 名稱, 工期, 前置任務)
-# ------------------------------------------------------------
-tasks = [
-    ("1", "研擬計畫", 1, []),            
-    ("2", "任務分配", 4, ["1"]),
-    ("3", "取得硬體", 17, ["1"]),
-    ("4", "程式開發", 70, ["2"]),
-    ("5", "安裝硬體", 10, ["3"]),
-    ("6", "程式測試", 30, ["4"]),
-    ("7", "撰寫使用手冊", 25, ["5"]),
-    ("8", "轉換檔案", 20, ["5"]),
-    ("9", "系統測試", 25, ["6"]),
-    ("10", "使用者訓練", 20, ["7","8"]),
-    ("11", "使用者測試", 25, ["9","10"]),
-]
+| 任務 | 說明 | 需時(天) | 前置任務 |
+|------|------|----------|----------|
+| 1 | 研擬計畫 | 1 | - |
+| 2 | 任務分配 | 4 | 1 |
+| 3 | 取得硬體 | 17 | 1 |
+| 4 | 程式開發 | 70 | 2 |
+| 5 | 安裝硬體 | 10 | 3 |
+| 6 | 程式測試 | 30 | 4 |
+| 7 | 撰寫使用手冊 | 25 | 5 |
+| 8 | 轉換檔案 | 20 | 5 |
+| 9 | 系統測試 | 25 | 6 |
+| 10 | 使用者訓練 | 20 | 7,8 |
+| 11 | 使用者測試 | 25 | 9,10 |
 
-# ------------------------------------------------------------
-# 2. 建立圖結構
-# ------------------------------------------------------------
-graph = defaultdict(list)
-durations = {}
-predecessors = defaultdict(list)
-for tid, name, duration, preds in tasks:
-    durations[tid] = duration
-    for p in preds:
-        graph[p].append(tid)
-    predecessors[tid] = preds
+## 1. PERT/CPM 網絡圖
 
-# ------------------------------------------------------------
-# 3. 拓樸排序 + 最早開始/完成時間
-# ------------------------------------------------------------
-indegree = {tid: 0 for tid, _, _, _ in tasks}
-for tid in graph:
-    for nxt in graph[tid]:
-        indegree[nxt] += 1
+```mermaid
+graph TD
+    Start([開始]) --> T1[1. 研擬計畫<br/>1天]
+    T1 --> T2[2. 任務分配<br/>4天]
+    T1 --> T3[3. 取得硬體<br/>17天]
+    T2 --> T4[4. 程式開發<br/>70天]
+    T3 --> T5[5. 安裝硬體<br/>10天]
+    T4 --> T6[6. 程式測試<br/>30天]
+    T5 --> T7[7. 撰寫使用手冊<br/>25天]
+    T5 --> T8[8. 轉換檔案<br/>20天]
+    T6 --> T9[9. 系統測試<br/>25天]
+    T7 --> T10[10. 使用者訓練<br/>20天]
+    T8 --> T10
+    T9 --> T11[11. 使用者測試<br/>25天]
+    T10 --> T11
+    T11 --> End([結束])
+    
+    classDef critical fill:#ff9999,stroke:#333,stroke-width:3px
+    class T1,T2,T4,T6,T9,T11 critical
+```
 
-queue = deque([tid for tid in indegree if indegree[tid] == 0])
-ES, EF = {}, {}
-while queue:
-    cur = queue.popleft()
-    ES[cur] = max([EF[p] for p in predecessors[cur]] or [0])
-    EF[cur] = ES[cur] + durations[cur]
-    for nxt in graph[cur]:
-        indegree[nxt] -= 1
-        if indegree[nxt] == 0:
-            queue.append(nxt)
+## 2. 甘特圖
 
-project_duration = max(EF.values())
+```mermaid
+gantt
+    title 專案時程甘特圖 (總工期: 155天)
+    dateFormat YYYY-MM-DD
+    axisFormat %m/%d
+    
+    section 計畫階段
+    研擬計畫 (第0-1天)           :crit, t1, 2024-01-01, 1d
+    任務分配 (第1-5天)           :crit, t2, after t1, 4d
+    取得硬體 (第1-18天)          :t3, 2024-01-02, 17d
+    
+    section 開發階段
+    程式開發 (第5-75天)          :crit, t4, after t2, 70d
+    安裝硬體 (第18-28天)         :t5, after t3, 10d
+    程式測試 (第75-105天)        :crit, t6, after t4, 30d
+    
+    section 整合階段
+    撰寫使用手冊 (第28-53天)     :t7, after t5, 25d
+    轉換檔案 (第28-48天)         :t8, after t5, 20d
+    系統測試 (第105-130天)       :crit, t9, after t6, 25d
+    
+    section 驗收階段
+    使用者訓練 (第53-73天)       :t10, after t7 t8, 20d
+    使用者測試 (第130-155天)     :crit, t11, after t9 t10, 25d
+```
 
-# ------------------------------------------------------------
-# 4. 計算最晚開始/完成時間 (LS, LF)
-# ------------------------------------------------------------
-LS, LF = {}, {}
-for tid in reversed(list(EF.keys())):
-    if not graph[tid]:  # 沒有後繼
-        LF[tid] = project_duration
-    else:
-        LF[tid] = min([LS[nxt] for nxt in graph[tid]])
-    LS[tid] = LF[tid] - durations[tid]
+## 3. 關鍵路徑分析
 
-# ------------------------------------------------------------
-# 5. 找出關鍵路徑 (slack=0)
-# ------------------------------------------------------------
-slack = {tid: LS[tid] - ES[tid] for tid in ES}
-critical_path = [tid for tid in slack if slack[tid] == 0]
+### 關鍵路徑
 
-print("專案總工期:", project_duration)
-print("關鍵路徑:", " → ".join(critical_path))
+```mermaid
+graph LR
+    A[任務1<br/>研擬計畫] --> B[任務2<br/>任務分配]
+    B --> C[任務4<br/>程式開發]
+    C --> D[任務6<br/>程式測試]
+    D --> E[任務9<br/>系統測試]
+    E --> F[任務11<br/>使用者測試]
+    
+    classDef critical fill:#ff6b6b,stroke:#d63031,stroke-width:3px,color:#fff
+    class A,B,C,D,E,F critical
+```
 
-# ------------------------------------------------------------
-# 6. 畫 PERT/CPM 圖
-# ------------------------------------------------------------
-dot = Digraph(format="png")
-dot.attr(rankdir="LR")
-for tid, name, duration, preds in tasks:
-    label = f"{tid}. {name}\\n工期:{duration}天\\nES:{ES[tid]}, EF:{EF[tid]}\\nLS:{LS[tid]}, LF:{LF[tid]}"
-    if tid in critical_path:
-        dot.node(tid, label, shape="box", style="filled", color="lightcoral")
-    else:
-        dot.node(tid, label, shape="box")
-    for p in preds:
-        dot.edge(p, tid)
-dot.render("pert_chart", cleanup=True)
-print("PERT/CPM 圖已輸出: pert_chart.png")
-
-# ------------------------------------------------------------
-# 7. 畫甘特圖
-# ------------------------------------------------------------
-df = pd.DataFrame([
-    {"任務": f"{tid}.{name}", "開始": ES[tid], "結束": EF[tid], "工期": durations[tid], "是否關鍵": tid in critical_path}
-    for tid, name, _, _ in tasks
-])
-
-fig, ax = plt.subplots(figsize=(10,6))
-for i, row in df.iterrows():
-    color = "red" if row["是否關鍵"] else "skyblue"
-    ax.barh(row["任務"], row["工期"], left=row["開始"], color=color, edgecolor="black")
-    ax.text(row["開始"]+row["工期"]/2, i, f"{row['工期']}天", va="center", ha="center", color="black")
-ax.set_xlabel("時間（天）")
-ax.set_ylabel("任務")
-ax.set_title("專案甘特圖")
-plt.gca().invert_yaxis()
-plt.show()
+**關鍵路徑：** `1 → 2 → 4 → 6 → 9 → 11`
